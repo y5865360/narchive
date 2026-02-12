@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NARCHIVE | Private Vault</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+        
+        :root {
+            --nude-pink: #f2d1d1;
+            --nude-pink-dark: #e9c4c4;
+            --bg-cream: #f8f5f4;
+            --text-charcoal: #4a4a4a;
+        }
+
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: var(--bg-cream);
+            color: var(--text-charcoal);
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* 極簡密碼牆樣式 */
+        #passwordWall {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background-color: var(--bg-cream);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.6s ease;
+        }
+
+        .main-content { opacity: 0; transition: opacity 0.8s ease; display: none; }
+        .is-unlocked .main-content { opacity: 1; display: block; }
+        .is-unlocked #passwordWall { opacity: 0; pointer-events: none; }
+
+        .main-title {
+            letter-spacing: 0.6em;
+            font-weight: 300;
+            color: var(--nude-pink-dark);
+            cursor: pointer;
+        }
+
+        /* 一行三個方塊排版 */
+        .perfume-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr)); 
+            gap: 1.25rem; 
+        }
+
+        @media (min-width: 768px) {
+            .perfume-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+
+        @media (min-width: 1024px) {
+            .perfume-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } 
+        }
+
+        .perfume-card {
+            background-color: #ffffff;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            border: 1px solid rgba(233, 196, 196, 0.2);
+            position: relative;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            border-radius: 1.25rem;
+            padding: 1.5rem;
+            height: fit-content;
+        }
+
+        .perfume-card.is-expanded {
+            border-color: var(--nude-pink-dark);
+            box-shadow: 0 10px 25px rgba(233, 196, 196, 0.25);
+            transform: scale(1.02);
+        }
+
+        /* 字體統一增加 2px */
+        .card-brand {
+            font-size: 16px; 
+            font-weight: 700;
+            color: var(--nude-pink-dark);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            word-break: break-word;
+        }
+
+        .card-name {
+            font-size: 14px; 
+            color: #777;
+            line-height: 1.5;
+            word-break: break-word;
+        }
+
+        .card-details {
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: all 0.4s ease;
+        }
+
+        .is-expanded .card-details {
+            max-height: 1000px;
+            opacity: 1;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px dashed #f0f0f0;
+        }
+
+        .note-label {
+            font-size: 11px; 
+            font-weight: 500;
+            color: var(--nude-pink-dark);
+            width: 40px; 
+            flex-shrink: 0;
+        }
+
+        .note-content { 
+            font-size: 13px; 
+            color: #666; 
+            flex: 1; 
+        }
+
+        .comment-box {
+            background-color: #fafafa;
+            border-radius: 0.75rem;
+            padding: 1rem;
+            font-size: 13px; 
+            color: #888;
+            font-style: italic;
+        }
+
+        .admin-only { display: none; }
+        .is-admin .admin-only { display: block; }
+        
+        .animate-slide { animation: slideIn 0.4s ease forwards; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="min-h-screen pb-20" id="bodyTag">
+
+    <!-- 極簡密碼驗證牆 -->
+    <div id="passwordWall">
+        <div class="text-center p-8 max-w-xs w-full">
+            <h2 class="main-title text-xl mb-12 ml-[0.6em]">NARCHIVE</h2>
+            <input type="password" id="guestPass" placeholder="••••" 
+                   class="w-full bg-white border border-[#e9c4c4]/30 rounded-full px-6 py-3 text-center text-xs tracking-[0.5em] focus:outline-none focus:border-[var(--nude-pink-dark)] transition-all">
+            <div id="passError" class="mt-4 text-[9px] text-red-300 tracking-widest hidden">ACCESS DENIED</div>
+        </div>
+    </div>
+
+    <!-- 主頁面內容 -->
+    <div class="main-content">
+        <header class="pt-12 pb-8 text-center">
+            <h1 class="main-title text-2xl mb-2 ml-[0.6em]" onclick="handleTitleClick()">NARCHIVE</h1>
+            <div id="connectionStatus" class="text-[10px] tracking-[0.4em] uppercase font-bold text-gray-300 italic">Vault Storage</div>
+        </header>
+
+        <main class="max-w-7xl mx-auto px-5">
+            <!-- 管理員介面 -->
+            <section id="inputSection" class="admin-only bg-white rounded-3xl p-8 mb-12 shadow-sm border border-[#eeebe9]/50">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="md:col-span-2 flex items-center justify-between mb-4">
+                        <span class="text-[12px] font-bold text-[var(--nude-pink-dark)] uppercase tracking-[0.3em]">New Archive Entry</span>
+                        <button onclick="logout()" class="text-[11px] text-gray-300 hover:text-gray-500 tracking-widest uppercase">Logout</button>
+                    </div>
+                    <input type="text" id="brand" placeholder="品牌 Brand" class="w-full p-2 border-b border-gray-50 focus:outline-none text-sm">
+                    <input type="text" id="name" placeholder="品名 Name" class="w-full p-2 border-b border-gray-50 focus:outline-none text-sm">
+                    <input type="text" id="topNotes" placeholder="前調" class="p-2 border-b border-gray-50 focus:outline-none text-xs">
+                    <input type="text" id="middleNotes" placeholder="中調" class="p-2 border-b border-gray-50 focus:outline-none text-xs">
+                    <input type="text" id="baseNotes" placeholder="後調" class="p-2 border-b border-gray-50 focus:outline-none text-xs md:col-span-2">
+                    <textarea id="comment" placeholder="私語或心得..." class="md:col-span-2 w-full p-4 bg-[#fafafa] rounded-2xl focus:outline-none text-xs text-gray-400" rows="3"></textarea>
+                    <div class="md:col-span-2 text-center mt-4">
+                        <button id="addBtn" onclick="addPerfume()" class="bg-[var(--nude-pink-dark)] text-white py-3 px-10 rounded-full font-bold text-[10px] uppercase shadow-md">儲存檔案</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 工具列 -->
+            <div class="mb-10 flex flex-row justify-between items-center px-2">
+                <div>
+                    <span id="totalCount" class="text-3xl font-light text-gray-400">0</span>
+                    <span class="text-[12px] text-gray-300 ml-2 uppercase tracking-widest font-bold">Fragrances</span>
+                </div>
+                <input type="text" id="searchInput" oninput="filterPerfumes()" placeholder="搜尋..." 
+                       class="bg-white border border-[#e9c4c4]/20 rounded-full px-5 py-2 text-xs w-36 md:w-56 focus:outline-none focus:ring-1 focus:ring-[var(--nude-pink-dark)]">
+            </div>
+
+            <div id="perfumeList" class="perfume-grid"></div>
+        </main>
+    </div>
+
+    <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 bg-[#5b4744] text-white px-10 py-3.5 rounded-full shadow-xl opacity-0 transition-all pointer-events-none text-[12px] tracking-[0.4em] z-[300]">SYNCED</div>
+
+    <script>
+        // --- 設定區 ---
+        const GUEST_CODE = "whereismymoney"; // 新密碼已更新
+        // --------------
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBOOVRxY_DMiYhjN7mjSd0I9INsfk6fY68",
+            authDomain: "perfume-e15d1.firebaseapp.com",
+            projectId: "perfume-e15d1",
+            storageBucket: "perfume-e15d1.firebasestorage.app",
+            messagingSenderId: "31612033766",
+            appId: "1:31612033766:web:96a1886ad3b34871a3f927"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+        
+        let isAdmin = false;
+        let allPerfumes = [];
+        let titleClickCount = 0;
+
+        // 監聽密碼輸入，自動驗證
+        document.getElementById('guestPass').addEventListener('input', (e) => {
+            if (e.target.value === GUEST_CODE) {
+                sessionStorage.setItem('vault_unlocked', 'true');
+                unlockVault();
+            }
+        });
+
+        // 支援 Enter 鍵手動驗證
+        document.getElementById('guestPass').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                if (e.target.value === GUEST_CODE) {
+                    sessionStorage.setItem('vault_unlocked', 'true');
+                    unlockVault();
+                } else {
+                    const errorEl = document.getElementById('passError');
+                    errorEl.classList.remove('hidden');
+                    setTimeout(() => errorEl.classList.add('hidden'), 2000);
+                }
+            }
+        });
+
+        function unlockVault() {
+            document.body.classList.add('is-unlocked');
+            loadData();
+        }
+
+        window.onload = () => {
+            if (sessionStorage.getItem('vault_unlocked') === 'true') {
+                unlockVault();
+            }
+        };
+
+        function handleTitleClick() {
+            titleClickCount++;
+            if (titleClickCount >= 5) { adminLogin(); titleClickCount = 0; }
+            setTimeout(() => titleClickCount = 0, 3000);
+        }
+
+        async function adminLogin() {
+            const email = prompt("Admin Email:");
+            const password = prompt("Password:");
+            if (email && password) {
+                try { await auth.signInWithEmailAndPassword(email, password); }
+                catch (e) { alert("Login Failed"); }
+            }
+        }
+
+        async function logout() { await auth.signOut(); location.reload(); }
+
+        auth.onAuthStateChanged(user => {
+            isAdmin = !!user;
+            document.getElementById('bodyTag').classList.toggle('is-admin', isAdmin);
+            document.getElementById('connectionStatus').innerText = isAdmin ? "SYSTEM: ADMIN" : "SYSTEM: PUBLIC";
+        });
+
+        function loadData() {
+            db.collection('perfumes').orderBy('createdAt', 'desc').onSnapshot(snapshot => {
+                allPerfumes = snapshot.docs.map(doc => ({ firebaseId: doc.id, ...doc.data() }));
+                render(allPerfumes);
+            }, error => {
+                console.error("Firestore error:", error);
+            });
+        }
+
+        function filterPerfumes() {
+            const term = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = allPerfumes.filter(p => 
+                (p.brand || "").toLowerCase().includes(term) || (p.name || "").toLowerCase().includes(term)
+            );
+            render(filtered);
+        }
+
+        function render(perfumes) {
+            const list = document.getElementById('perfumeList');
+            document.getElementById('totalCount').innerText = perfumes.length;
+            list.innerHTML = '';
+            perfumes.forEach((p, index) => {
+                const card = document.createElement('div');
+                card.className = `perfume-card animate-slide`;
+                card.style.animationDelay = `${index * 0.03}s`;
+                card.onclick = () => card.classList.toggle('is-expanded');
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="card-brand">${p.brand}</div>
+                        <i class="fas fa-heart text-[var(--nude-pink-dark)] opacity-40 text-[10px] mt-1"></i>
+                    </div>
+                    <div class="card-name">${p.name}</div>
+                    <div class="card-details">
+                        ${p.topNotes ? `<div class="flex mb-2"><span class="note-label">前調</span><span class="note-content">${p.topNotes}</span></div>` : ''}
+                        ${p.middleNotes ? `<div class="flex mb-2"><span class="note-label">中調</span><span class="note-content">${p.middleNotes}</span></div>` : ''}
+                        ${p.baseNotes ? `<div class="flex mb-2"><span class="note-label">後調</span><span class="note-content">${p.baseNotes}</span></div>` : ''}
+                        ${p.comment ? `<div class="comment-box mt-4">${p.comment}</div>` : ''}
+                        ${isAdmin ? `<button onclick="deletePerfume('${p.firebaseId}', event)" class="mt-6 text-[11px] text-red-300 uppercase font-bold">Delete Entry</button>` : ''}
+                    </div>
+                `;
+                list.appendChild(card);
+            });
+        }
+
+        async function addPerfume() {
+            const brand = document.getElementById('brand').value;
+            const name = document.getElementById('name').value;
+            if (!brand || !name) return;
+            try {
+                await db.collection('perfumes').add({
+                    brand, name,
+                    topNotes: document.getElementById('topNotes').value,
+                    middleNotes: document.getElementById('middleNotes').value,
+                    baseNotes: document.getElementById('baseNotes').value,
+                    comment: document.getElementById('comment').value,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                showToast('ARCHIVED');
+                document.querySelectorAll('input, textarea').forEach(el => el.id !== 'guestPass' && (el.value = ''));
+            } catch (e) { alert("Error adding document"); }
+        }
+
+        async function deletePerfume(id, e) {
+            e.stopPropagation();
+            if (confirm('Delete permanently?')) await db.collection('perfumes').doc(id).delete();
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg; t.style.opacity = '1';
+            setTimeout(() => t.style.opacity = '0', 2000);
+        }
+    </script>
+</body>
+</html>
